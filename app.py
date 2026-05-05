@@ -4,7 +4,7 @@ from fpdf import FPDF
 import datetime
 
 # --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="Liquidador de Consultoría", layout="wide")
+st.set_page_config(page_title="Liquidación de Proyectos", layout="wide")
 
 
 # --- CLASE PARA EL PDF ---
@@ -24,8 +24,28 @@ class PDF(FPDF):
 # --- INICIALIZACIÓN DE ESTADO ---
 if "componentes" not in st.session_state:
     st.session_state.componentes = [
-        {"nombre": "Componente 01", "n_entregables": 1}
+        {"nombre": "Componente 1", "n_entregables": 1}
     ]
+
+if "pct_adelanto_ui" not in st.session_state:
+    st.session_state.pct_adelanto_ui = 30.0
+    st.session_state.slider_adelanto = 30.0
+    st.session_state.input_adelanto = 30.0
+
+
+# --- FUNCIONES PARA SINCRONIZAR ADELANTO ---
+def sync_from_slider():
+    valor = float(st.session_state.slider_adelanto)
+    st.session_state.pct_adelanto_ui = valor
+    st.session_state.input_adelanto = valor
+
+
+def sync_from_input():
+    valor = float(st.session_state.input_adelanto)
+    valor = max(0.0, min(30.0, valor))
+    st.session_state.pct_adelanto_ui = valor
+    st.session_state.slider_adelanto = valor
+    st.session_state.input_adelanto = valor
 
 
 # --- INTERFAZ PRINCIPAL ---
@@ -44,38 +64,19 @@ with st.expander("⚙️ Configuración del Proyecto", expanded=True):
     with col2:
         monto_con_igv = st.number_input(
             "Monto Total Vigente del Contrato C/IGV",
-            value=1791406.84,
+            value=100000.00,
             step=0.01,
             format="%.2f"
         )
 
         monto_sin_igv = monto_con_igv / 1.18
 
-        # --- Estado inicial para adelanto ---
-        if "pct_adelanto_ui" not in st.session_state:
-            st.session_state.pct_adelanto_ui = 30.0
-            st.session_state.slider_adelanto = 30.0
-            st.session_state.input_adelanto = 30.0
-
-        # --- Funciones de sincronización ---
-        def sync_from_slider():
-            valor = float(st.session_state.slider_adelanto)
-            st.session_state.pct_adelanto_ui = valor
-            st.session_state.input_adelanto = valor
-
-        def sync_from_input():
-            valor = float(st.session_state.input_adelanto)
-            valor = max(0.0, min(30.0, valor))  # limita entre 0 y 30
-            st.session_state.pct_adelanto_ui = valor
-            st.session_state.slider_adelanto = valor
-            st.session_state.input_adelanto = valor
-
         st.markdown("**% Adelanto Directo**")
-        c_adel_1, c_adel_2 = st.columns([3, 1])
+        col_slider, col_manual = st.columns([3, 1])
 
-        with c_adel_1:
+        with col_slider:
             st.slider(
-                "Seleccione el porcentaje",
+                "Seleccione el porcentaje de adelanto",
                 min_value=0.0,
                 max_value=30.0,
                 step=0.01,
@@ -84,9 +85,9 @@ with st.expander("⚙️ Configuración del Proyecto", expanded=True):
                 label_visibility="collapsed"
             )
 
-        with c_adel_2:
+        with col_manual:
             st.number_input(
-                "Ingrese manualmente",
+                "Ingrese manualmente el porcentaje de adelanto",
                 min_value=0.0,
                 max_value=30.0,
                 step=0.01,
@@ -99,8 +100,8 @@ with st.expander("⚙️ Configuración del Proyecto", expanded=True):
         pct_adelanto = st.session_state.pct_adelanto_ui / 100
 
     with col3:
-        io = st.number_input("Índice Base Io", value=130.48, format="%.2f")
-        ia = st.number_input("Índice Adelanto Ia", value=131.77, format="%.2f")
+        io = st.number_input("Índice Base Io", value=130.50, step=0.01, format="%.2f")
+        ia = st.number_input("Índice Adelanto Ia", value=131.77, step=0.01, format="%.2f")
 
 
 # 2. GESTIÓN DE COMPONENTES
@@ -116,7 +117,7 @@ todos_entregables = []
 
 for idx, comp in enumerate(st.session_state.componentes):
     with st.container(border=True):
-        c1, c2, c3 = st.columns([3, 2, 1])
+        c1, c2, c3 = st.columns([3, 2, 0.2])
 
         comp["nombre"] = c1.text_input(
             "Nombre del Componente",
@@ -138,7 +139,7 @@ for idx, comp in enumerate(st.session_state.componentes):
         st.markdown("**Detalle de entregables**")
 
         for i in range(int(comp["n_entregables"])):
-            cols = st.columns([3, 1, 1, 1, 1])
+            cols = st.columns([3, 1, 1, 1])
 
             desc = cols[0].text_input(
                 "Descripción",
@@ -148,7 +149,7 @@ for idx, comp in enumerate(st.session_state.componentes):
 
             peso = cols[1].number_input(
                 "% Incidencia",
-                value=10.0,
+                value=50.0,
                 step=0.01,
                 format="%.2f",
                 key=f"p_{idx}_{i}"
@@ -162,26 +163,34 @@ for idx, comp in enumerate(st.session_state.componentes):
                 key=f"ir_{idx}_{i}"
             )
 
-            pagado_con_igv = cols[3].number_input(
-                "Ya Pagado C/IGV",
+            pago_efectuado_con_igv = cols[3].number_input(
+                "Pago efectuado C/IGV",
                 value=0.0,
                 step=0.01,
                 format="%.2f",
                 key=f"pg_{idx}_{i}"
             )
 
-            # --- CÁLCULOS ---
+            # --- CÁLCULOS BASE ---
             monto_parcial_sin_igv = monto_sin_igv * peso
 
             reajuste = (ir / io - 1) * monto_parcial_sin_igv
 
-            deduccion = ((ir - ia) / ia) * (monto_parcial_sin_igv * pct_adelanto)
+            # Deducción por reajuste del adelanto
+            deduccion_reajuste_adelanto = ((ir - ia) / ia) * (monto_parcial_sin_igv * pct_adelanto)
 
-            neto_sin_igv = monto_parcial_sin_igv + reajuste - deduccion
-
+            neto_sin_igv = monto_parcial_sin_igv + reajuste - deduccion_reajuste_adelanto
             neto_con_igv = neto_sin_igv * 1.18
 
-            saldo = neto_con_igv - pagado_con_igv
+            # Amortización del adelanto directo
+            amortizacion_adelanto_con_igv = monto_con_igv * pct_adelanto * peso
+
+            # Total reconocido al consultor:
+            # pago efectuado + amortización del adelanto
+            total_reconocido_con_igv = pago_efectuado_con_igv + amortizacion_adelanto_con_igv
+
+            # Saldo real
+            saldo = neto_con_igv - total_reconocido_con_igv
 
             if saldo > 0:
                 situacion = "Saldo por pagar"
@@ -193,13 +202,16 @@ for idx, comp in enumerate(st.session_state.componentes):
             todos_entregables.append({
                 "Componente": comp["nombre"],
                 "Entregable": desc,
+                "% Incidencia": round(peso * 100, 2),
                 "Monto S/IGV": round(monto_parcial_sin_igv, 2),
                 "Ir": round(ir, 2),
                 "Reajuste": round(reajuste, 2),
-                "Deducción": round(deduccion, 2),
+                "Deducción reajuste adelanto": round(deduccion_reajuste_adelanto, 2),
                 "Neto S/IGV": round(neto_sin_igv, 2),
                 "Neto C/IGV": round(neto_con_igv, 2),
-                "Pagado C/IGV": round(pagado_con_igv, 2),
+                "Pago efectuado C/IGV": round(pago_efectuado_con_igv, 2),
+                "Amortización adelanto C/IGV": round(amortizacion_adelanto_con_igv, 2),
+                "Total reconocido C/IGV": round(total_reconocido_con_igv, 2),
                 "Saldo": round(saldo, 2),
                 "Situación": situacion
             })
@@ -214,17 +226,34 @@ if not df.empty:
 
     st.dataframe(df, use_container_width=True)
 
+    # --- VALIDACIÓN DE INCIDENCIA ---
+    total_incidencia = df["% Incidencia"].sum()
+
+    if round(total_incidencia, 2) != 100.00:
+        st.warning(
+            f"⚠️ La suma de incidencias es {total_incidencia:.2f}%. "
+            "Para una liquidación total del contrato, debería sumar 100%."
+        )
+
     # --- TOTALES GENERALES ---
     total_valorizacion_sin_igv = df["Monto S/IGV"].sum()
     total_reajuste = df["Reajuste"].sum()
-    total_deduccion = df["Deducción"].sum()
+    total_deduccion_reajuste_adelanto = df["Deducción reajuste adelanto"].sum()
 
-    subtotal_sin_igv = total_valorizacion_sin_igv + total_reajuste - total_deduccion
+    subtotal_sin_igv = (
+        total_valorizacion_sin_igv
+        + total_reajuste
+        - total_deduccion_reajuste_adelanto
+    )
+
     igv = subtotal_sin_igv * 0.18
     total_liquidacion_con_igv = subtotal_sin_igv * 1.18
 
-    total_pagado_con_igv = df["Pagado C/IGV"].sum()
-    saldo_final = total_liquidacion_con_igv - total_pagado_con_igv
+    total_pago_efectuado_con_igv = df["Pago efectuado C/IGV"].sum()
+    total_amortizacion_adelanto_con_igv = df["Amortización adelanto C/IGV"].sum()
+    total_reconocido_con_igv = df["Total reconocido C/IGV"].sum()
+
+    saldo_final = total_liquidacion_con_igv - total_reconocido_con_igv
 
     if saldo_final > 0:
         estado_saldo = "SALDO A PAGAR AL CONSULTOR"
@@ -236,7 +265,7 @@ if not df.empty:
     # --- MÉTRICAS EN PANTALLA ---
     st.subheader("💰 Resultado financiero final")
 
-    m1, m2, m3 = st.columns(3)
+    m1, m2, m3, m4 = st.columns(4)
 
     m1.metric(
         "Total liquidación C/IGV",
@@ -244,14 +273,32 @@ if not df.empty:
     )
 
     m2.metric(
-        "Total pagado C/IGV",
-        f"S/. {total_pagado_con_igv:,.2f}"
+        "Pago efectuado C/IGV",
+        f"S/. {total_pago_efectuado_con_igv:,.2f}"
     )
 
     m3.metric(
+        "Amortización adelanto C/IGV",
+        f"S/. {total_amortizacion_adelanto_con_igv:,.2f}"
+    )
+
+    m4.metric(
         estado_saldo,
         f"S/. {abs(saldo_final):,.2f}"
     )
+
+    # --- EXPLICACIÓN EN PANTALLA ---
+    with st.expander("📌 Ver explicación del cálculo del saldo"):
+        st.write("El saldo final se calcula así:")
+        st.code(
+            "Saldo final = Total liquidación C/IGV - Pago efectuado C/IGV - Amortización del adelanto C/IGV",
+            language="text"
+        )
+
+        st.write(f"Total liquidación C/IGV: S/. {total_liquidacion_con_igv:,.2f}")
+        st.write(f"Pago efectuado C/IGV: S/. {total_pago_efectuado_con_igv:,.2f}")
+        st.write(f"Amortización adelanto C/IGV: S/. {total_amortizacion_adelanto_con_igv:,.2f}")
+        st.write(f"{estado_saldo}: S/. {abs(saldo_final):,.2f}")
 
     # --- EXPORTAR A PDF ---
     if st.button("📝 Generar y Descargar PDF"):
@@ -263,41 +310,49 @@ if not df.empty:
         pdf.cell(0, 7, f"Entidad: {entidad}", ln=1)
         pdf.cell(0, 7, f"Consultor: {consultor}", ln=1)
         pdf.cell(0, 7, f"Fecha: {datetime.date.today()}", ln=1)
+        pdf.cell(0, 7, f"Monto contractual vigente C/IGV: S/. {monto_con_igv:,.2f}", ln=1)
+        pdf.cell(0, 7, f"Adelanto directo: {st.session_state.pct_adelanto_ui:.2f}%", ln=1)
         pdf.ln(5)
 
         # Detalle por entregables
         pdf.chapter_title("1. DETALLE POR ENTREGABLES")
 
-        pdf.set_font("helvetica", "B", 7)
+        pdf.set_font("helvetica", "B", 6)
 
         columnas_pdf = [
             "Componente",
             "Entregable",
+            "Incid. %",
             "Monto S/IGV",
             "Reaj.",
-            "Ded.",
+            "Ded. reaj.",
             "Neto C/IGV",
-            "Pagado",
+            "Pago",
+            "Amort.",
+            "Reconoc.",
             "Saldo"
         ]
 
-        anchos = [38, 50, 30, 26, 26, 32, 32, 32]
+        anchos = [30, 38, 18, 25, 22, 24, 27, 27, 27, 27, 24]
 
         for i, col in enumerate(columnas_pdf):
             pdf.cell(anchos[i], 8, col, 1, 0, "C")
         pdf.ln()
 
-        pdf.set_font("helvetica", "", 7)
+        pdf.set_font("helvetica", "", 6)
 
         for _, row in df.iterrows():
-            pdf.cell(anchos[0], 6, str(row["Componente"])[:25], 1)
-            pdf.cell(anchos[1], 6, str(row["Entregable"])[:35], 1)
-            pdf.cell(anchos[2], 6, f"{row['Monto S/IGV']:,.2f}", 1, 0, "R")
-            pdf.cell(anchos[3], 6, f"{row['Reajuste']:,.2f}", 1, 0, "R")
-            pdf.cell(anchos[4], 6, f"{row['Deducción']:,.2f}", 1, 0, "R")
-            pdf.cell(anchos[5], 6, f"{row['Neto C/IGV']:,.2f}", 1, 0, "R")
-            pdf.cell(anchos[6], 6, f"{row['Pagado C/IGV']:,.2f}", 1, 0, "R")
-            pdf.cell(anchos[7], 6, f"{row['Saldo']:,.2f}", 1, 0, "R")
+            pdf.cell(anchos[0], 6, str(row["Componente"])[:22], 1)
+            pdf.cell(anchos[1], 6, str(row["Entregable"])[:28], 1)
+            pdf.cell(anchos[2], 6, f"{row['% Incidencia']:,.2f}", 1, 0, "R")
+            pdf.cell(anchos[3], 6, f"{row['Monto S/IGV']:,.2f}", 1, 0, "R")
+            pdf.cell(anchos[4], 6, f"{row['Reajuste']:,.2f}", 1, 0, "R")
+            pdf.cell(anchos[5], 6, f"{row['Deducción reajuste adelanto']:,.2f}", 1, 0, "R")
+            pdf.cell(anchos[6], 6, f"{row['Neto C/IGV']:,.2f}", 1, 0, "R")
+            pdf.cell(anchos[7], 6, f"{row['Pago efectuado C/IGV']:,.2f}", 1, 0, "R")
+            pdf.cell(anchos[8], 6, f"{row['Amortización adelanto C/IGV']:,.2f}", 1, 0, "R")
+            pdf.cell(anchos[9], 6, f"{row['Total reconocido C/IGV']:,.2f}", 1, 0, "R")
+            pdf.cell(anchos[10], 6, f"{row['Saldo']:,.2f}", 1, 0, "R")
             pdf.ln()
 
         # Resumen financiero
@@ -307,13 +362,15 @@ if not df.empty:
         pdf.set_font("helvetica", "", 10)
 
         resumen_data = [
-            ("VALORIZACIÓN TOTAL SIN IGV", total_valorizacion_sin_igv),
+            ("VALORIZACION TOTAL SIN IGV", total_valorizacion_sin_igv),
             ("REAJUSTE TOTAL", total_reajuste),
-            ("DEDUCCIONES TOTALES", total_deduccion),
+            ("DEDUCCION POR REAJUSTE DEL ADELANTO", total_deduccion_reajuste_adelanto),
             ("SUBTOTAL SIN IGV", subtotal_sin_igv),
             ("IGV 18%", igv),
-            ("TOTAL LIQUIDACIÓN CON IGV", total_liquidacion_con_igv),
-            ("TOTAL PAGADO CON IGV", total_pagado_con_igv),
+            ("TOTAL LIQUIDACION CON IGV", total_liquidacion_con_igv),
+            ("PAGO EFECTUADO CON IGV", total_pago_efectuado_con_igv),
+            ("AMORTIZACION DEL ADELANTO CON IGV", total_amortizacion_adelanto_con_igv),
+            ("TOTAL RECONOCIDO CON IGV", total_reconocido_con_igv),
             (estado_saldo, abs(saldo_final))
         ]
 
@@ -323,29 +380,32 @@ if not df.empty:
             else:
                 pdf.set_font("helvetica", "", 10)
 
-            pdf.cell(120, 8, concepto, 1)
+            pdf.cell(130, 8, concepto, 1)
             pdf.cell(60, 8, f"S/. {monto:,.2f}", 1, 1, "R")
 
-        # Interpretación final
+        # Conclusión final
         pdf.ln(6)
         pdf.set_font("helvetica", "B", 10)
-        pdf.cell(0, 8, "3. CONCLUSIÓN", ln=1)
+        pdf.cell(0, 8, "3. CONCLUSION", ln=1)
 
         pdf.set_font("helvetica", "", 10)
 
         if saldo_final > 0:
             conclusion = (
-                f"De la liquidación efectuada, se determina un saldo pendiente "
+                f"De la liquidacion efectuada, considerando el pago efectuado y la "
+                f"amortizacion del adelanto directo, se determina un saldo pendiente "
                 f"por pagar al consultor ascendente a S/. {abs(saldo_final):,.2f}."
             )
         elif saldo_final < 0:
             conclusion = (
-                f"De la liquidación efectuada, se determina un saldo a favor de la entidad "
+                f"De la liquidacion efectuada, considerando el pago efectuado y la "
+                f"amortizacion del adelanto directo, se determina un saldo a favor de la entidad "
                 f"ascendente a S/. {abs(saldo_final):,.2f}."
             )
         else:
             conclusion = (
-                "De la liquidación efectuada, no se determina saldo pendiente entre las partes."
+                "De la liquidacion efectuada, considerando el pago efectuado y la "
+                "amortizacion del adelanto directo, no se determina saldo pendiente entre las partes."
             )
 
         pdf.multi_cell(0, 7, conclusion)
